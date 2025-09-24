@@ -1,0 +1,279 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// Мультиарендность - рестораны
+model Tenant {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  plan        String   @default("free") // free, pro, enterprise
+  status      String   @default("active") // active, suspended, deleted
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Связи
+  locations   Location[]
+  users       User[]
+  menus       Menu[]
+  categories  Category[]
+  items       Item[]
+  mediaAssets MediaAsset[]
+  themes      Theme?
+  translations Translation[]
+  analyticsEvents AnalyticsEvent[]
+  subscriptions Subscription[]
+  auditLogs   AuditLog[]
+
+  @@map("tenants")
+}
+
+// Локации ресторанов
+model Location {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  name      String
+  timezone  String   @default("UTC")
+  currency  String   @default("USD")
+  locale    String   @default("en")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Связи
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  menus     Menu[]
+
+  @@map("locations")
+}
+
+// Пользователи системы
+model User {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  email       String
+  passwordHash String  @map("password_hash")
+  role        String   // superadmin, owner, editor, waiter
+  status      String   @default("active") // active, inactive, suspended
+  mfaEnabled  Boolean  @default(false) @map("mfa_enabled")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Связи
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  auditLogs   AuditLog[]
+
+  @@unique([tenantId, email])
+  @@map("users")
+}
+
+// Меню
+model Menu {
+  id           String   @id @default(cuid())
+  tenantId     String   @map("tenant_id")
+  locationId   String   @map("location_id")
+  name         String
+  active       Boolean  @default(true)
+  scheduleJson String?  @map("schedule_json") // JSON с расписанием
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Связи
+  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  location     Location   @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  categories   Category[]
+
+  @@map("menus")
+}
+
+// Категории блюд
+model Category {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  menuId    String   @map("menu_id")
+  name      String
+  sort      Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Связи
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  menu      Menu     @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  items     Item[]
+
+  @@map("categories")
+}
+
+// Блюда
+model Item {
+  id                  String   @id @default(cuid())
+  tenantId            String   @map("tenant_id")
+  categoryId          String   @map("category_id")
+  sku                 String?
+  name                String
+  description         String?
+  tags                String   @default("[]") // JSON array
+  allergens           String   @default("[]") // JSON array
+  nutritionValuesJson String?  @map("nutrition_values_json") // JSON
+  weightG             Int?     @map("weight_g")
+  kcal                Int?
+  sort                Int      @default(0)
+  visibilityRuleJson  String?  @map("visibility_rule_json") // JSON
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  // Связи
+  tenant              Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category            Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  prices              Price[]
+  itemMedia           ItemMedia[]
+
+  @@map("items")
+}
+
+// Цены
+model Price {
+  id          String    @id @default(cuid())
+  itemId      String    @map("item_id")
+  currency    String
+  amountMinor Int       @map("amount_minor") // цена в копейках/центах
+  startAt     DateTime? @map("start_at")
+  endAt       DateTime? @map("end_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Связи
+  item        Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@map("prices")
+}
+
+// Медиа-файлы
+model MediaAsset {
+  id           String   @id @default(cuid())
+  tenantId     String   @map("tenant_id")
+  type         String   // video, audio, image
+  status       String   @default("uploaded") // uploaded, processing, ready, failed
+  originalUrl  String?  @map("original_url")
+  hlsUrl       String?  @map("hls_url")
+  posterUrl    String?  @map("poster_url")
+  waveformUrl  String?  @map("waveform_url")
+  durationMs   Int?     @map("duration_ms")
+  width        Int?
+  height       Int?
+  lufs         Float?   // громкость в LUFS
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Связи
+  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  itemMedia    ItemMedia[]
+
+  @@map("media_assets")
+}
+
+// Связь блюд с медиа
+model ItemMedia {
+  id        String   @id @default(cuid())
+  itemId    String   @map("item_id")
+  mediaId   String   @map("media_id")
+  kind      String   // preview, full, sound
+  sort      Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Связи
+  item      Item       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  media     MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@map("item_media")
+}
+
+// Темы оформления
+model Theme {
+  id         String   @id @default(cuid())
+  tenantId   String   @unique @map("tenant_id")
+  paletteJson String  @map("palette_json") // JSON с цветами
+  fonts      String?  // JSON с шрифтами
+  logoUrl    String?  @map("logo_url")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Связи
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("themes")
+}
+
+// Переводы
+model Translation {
+  id         String   @id @default(cuid())
+  tenantId   String   @map("tenant_id")
+  entityType String   @map("entity_type") // menu, category, item
+  entityId   String   @map("entity_id")
+  locale     String
+  key        String   // name, description
+  value      String
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Связи
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entityType, entityId, locale, key])
+  @@map("translations")
+}
+
+// События аналитики
+model AnalyticsEvent {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  type        String   // view_category, open_item, play_preview, unmute, play_full, complete, qr_scan
+  sessionId   String   @map("session_id")
+  payloadJson String   @map("payload_json") // JSON с данными события
+  timestamp   DateTime @default(now()) @map("ts")
+
+  // Связи
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("analytics_events")
+}
+
+// Подписки и биллинг
+model Subscription {
+  id          String    @id @default(cuid())
+  tenantId    String    @map("tenant_id")
+  plan        String
+  status      String    // active, canceled, past_due
+  currentPeriodStart DateTime @map("current_period_start")
+  currentPeriodEnd   DateTime @map("current_period_end")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Связи
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+// Логи аудита
+model AuditLog {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  userId    String?  @map("user_id")
+  action    String   // create, update, delete
+  entity    String   // menu, item, media
+  entityId  String   @map("entity_id")
+  changes   String?  // JSON с изменениями
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Связи
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
